@@ -3,42 +3,251 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Impostor Wortspiel</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>Impostor Online</title>
+  <style>
+    body{font-family:system-ui,Arial;background:#f6f7fb;margin:0}
+    .card{max-width:720px;margin:24px auto;background:#fff;padding:18px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08)}
+    label{display:block;margin-top:12px;font-weight:600}
+    input,textarea{width:100%;padding:10px;margin-top:6px;border:1px solid #ddd;border-radius:12px;box-sizing:border-box}
+    button{padding:10px 14px;border:0;border-radius:12px;background:#111827;color:#fff;cursor:pointer}
+    button.secondary{background:#e5e7eb;color:#111827}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    .hidden{display:none}
+    .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#f3f4f6;margin:4px 6px 0 0}
+    .secret{padding:14px;border-radius:14px;background:#f3f4f6;margin-top:12px;font-size:18px;text-align:center}
+    small{color:#6b7280}
+  </style>
 </head>
 <body>
   <main class="card">
-    <h1>Impostor Wortspiel</h1>
+    <h1>Impostor Online</h1>
+    <small>Ohne Login (anonym), Supabase Backend</small>
 
-    <section id="setup">
-      <label>Spieler (2–20)</label>
-      <input id="playerCount" type="number" min="2" max="20" value="6" />
-
-      <label>Wörter (eins pro Zeile)</label>
-      <textarea id="words" rows="8" placeholder="Pizza&#10;Berlin&#10;Schule"></textarea>
-
-      <button id="startBtn">Spiel starten</button>
-      <p class="hint">Tipp: Ihr könnt beliebige eigene Wörter benutzen.</p>
+    <section id="screenHome">
+      <div class="row">
+        <button id="btnGoCreate">Raum erstellen</button>
+        <button id="btnGoJoin" class="secondary">Raum beitreten</button>
+      </div>
     </section>
 
-    <section id="reveal" class="hidden">
-      <h2 id="playerTitle">Spieler 1</h2>
-      <div class="secret" id="secretBox">Klicke auf „Aufdecken“</div>
-
+    <section id="screenCreate" class="hidden">
+      <h2>Raum erstellen</h2>
+      <label>Raumcode (z.B. ABCD)</label>
+      <input id="createCode" placeholder="ABCD" maxlength="8" />
+      <label>Wörter (eins pro Zeile)</label>
+      <textarea id="createWords" rows="8" placeholder="Pizza&#10;Berlin&#10;Schule"></textarea>
       <div class="row">
-        <button id="revealBtn">Aufdecken</button>
-        <button id="hideBtn" class="secondary">Verstecken</button>
+        <button id="btnCreateRoom">Erstellen</button>
+        <button id="btnBack1" class="secondary">Zurück</button>
       </div>
+      <p id="createMsg"></p>
+    </section>
 
+    <section id="screenJoin" class="hidden">
+      <h2>Raum beitreten</h2>
+      <label>Raumcode</label>
+      <input id="joinCode" placeholder="ABCD" maxlength="8" />
+      <label>Dein Name</label>
+      <input id="joinName" placeholder="Max" maxlength="20" />
       <div class="row">
-        <button id="nextBtn">Nächster Spieler</button>
-        <button id="restartBtn" class="secondary">Neu starten</button>
+        <button id="btnJoinRoom">Beitreten</button>
+        <button id="btnBack2" class="secondary">Zurück</button>
       </div>
+      <p id="joinMsg"></p>
+    </section>
 
-      <p class="hint" id="statusHint"></p>
+    <section id="screenLobby" class="hidden">
+      <h2>Lobby: <span id="lobbyCode"></span></h2>
+      <div>
+        <b>Spieler:</b>
+        <div id="playerList"></div>
+      </div>
+      <div class="row">
+        <button id="btnStart" class="hidden">Spiel starten (Host)</button>
+        <button id="btnShowRole" class="secondary">Meine Rolle anzeigen</button>
+        <button id="btnLeave" class="secondary">Verlassen</button>
+      </div>
+      <div class="secret" id="roleBox">Noch nicht gestartet.</div>
+      <p><small>Teile den Code mit Freunden. Jeder tritt mit Name bei.</small></p>
     </section>
   </main>
 
-  <script src="app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // 1) SET YOUR KEYS
+    const SUPABASE_URL = "https://iklskwrlfgwqzxlnqwbf.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_gNG-MWKD5sl8J_bUd_2-FA_8k1ledrQ";
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // UI helpers
+    const $ = (id)=>document.getElementById(id);
+    const show = (id)=>$(id).classList.remove("hidden");
+    const hide = (id)=>$(id).classList.add("hidden");
+    const screens = ["screenHome","screenCreate","screenJoin","screenLobby"];
+    const go = (which)=>{ screens.forEach(s=>hide(s)); show(which); };
+
+    let roomId = null;
+    let roomCode = null;
+    let hostUid = null;
+    let meUid = null;
+
+    function normalizeCode(s){
+      return (s||"").trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,8);
+    }
+    function parseWords(text){
+      return (text||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    }
+
+    async function ensureAnonAuth(){
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        meUid = session.user.id;
+        return;
+      }
+      const { data, error } = await supabase.auth.signInAnonymously();
+      if (error) throw error;
+      meUid = data.user.id;
+    }
+
+    async function loadRoomByCode(code){
+      const { data, error } = await supabase
+        .from("rooms")
+        .select("id, code, host_uid, status")
+        .eq("code", code)
+        .single();
+      if (error) throw error;
+      roomId = data.id;
+      roomCode = data.code;
+      hostUid = data.host_uid;
+      $("lobbyCode").textContent = roomCode;
+      return data;
+    }
+
+    async function refreshPlayers(){
+      const { data, error } = await supabase
+        .from("players_public")
+        .select("name, uid")
+        .eq("room_id", roomId)
+        .order("joined_at", { ascending: true });
+      if (error) throw error;
+      $("playerList").innerHTML = data.map(p=>`<span class="pill">${escapeHtml(p.name)}</span>`).join("");
+    }
+
+    async function refreshRoleBox(){
+      // read my private role
+      const { data, error } = await supabase
+        .from("players_private")
+        .select("assigned_word, is_impostor")
+        .eq("room_id", roomId)
+        .eq("uid", meUid)
+        .single();
+      if (error) {
+        $("roleBox").textContent = "Keine Rolle gefunden (noch nicht gestartet?)";
+        return;
+      }
+      if (data.is_impostor) $("roleBox").textContent = "Du bist der IMPOSTOR (kein Wort)!";
+      else if (data.assigned_word) $("roleBox").textContent = "WORT: " + data.assigned_word;
+      else $("roleBox").textContent = "Noch nicht gestartet.";
+    }
+
+    function escapeHtml(s){
+      return (s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    // Buttons
+    $("btnGoCreate").onclick = ()=>go("screenCreate");
+    $("btnGoJoin").onclick = ()=>go("screenJoin");
+    $("btnBack1").onclick = ()=>go("screenHome");
+    $("btnBack2").onclick = ()=>go("screenHome");
+
+    $("btnCreateRoom").onclick = async ()=>{
+      try{
+        await ensureAnonAuth();
+        const code = normalizeCode($("createCode").value);
+        const words = parseWords($("createWords").value);
+        if(!code) return $("createMsg").textContent = "Bitte Code eingeben.";
+        if(words.length < 1) return $("createMsg").textContent = "Bitte mindestens 1 Wort eingeben.";
+
+        $("createMsg").textContent = "Erstelle Raum...";
+        const { data, error } = await supabase.rpc("create_room", { p_code: code, p_words: words });
+        if (error) throw error;
+
+        // now join lobby view
+        await loadRoomByCode(code);
+        go("screenLobby");
+        $("btnStart").classList.toggle("hidden", hostUid !== meUid);
+        await refreshPlayers();
+        $("roleBox").textContent = "Lobby. Warte auf Start.";
+        subscribeRoom();
+      }catch(e){
+        $("createMsg").textContent = "Fehler: " + (e.message || e);
+      }
+    };
+
+    $("btnJoinRoom").onclick = async ()=>{
+      try{
+        await ensureAnonAuth();
+        const code = normalizeCode($("joinCode").value);
+        const name = ($("joinName").value||"").trim().slice(0,20);
+        if(!code) return $("joinMsg").textContent = "Bitte Code eingeben.";
+        if(!name) return $("joinMsg").textContent = "Bitte Name eingeben.";
+
+        $("joinMsg").textContent = "Trete bei...";
+        const { data, error } = await supabase.rpc("join_room", { p_code: code, p_name: name });
+        if (error) throw error;
+
+        await loadRoomByCode(code);
+        go("screenLobby");
+        $("btnStart").classList.toggle("hidden", hostUid !== meUid);
+        await refreshPlayers();
+        await refreshRoleBox();
+        subscribeRoom();
+      }catch(e){
+        $("joinMsg").textContent = "Fehler: " + (e.message || e);
+      }
+    };
+
+    $("btnStart").onclick = async ()=>{
+      try{
+        $("roleBox").textContent = "Starte Spiel...";
+        const { error } = await supabase.rpc("start_game", { p_code: roomCode });
+        if (error) throw error;
+        await refreshRoleBox();
+      }catch(e){
+        $("roleBox").textContent = "Fehler: " + (e.message || e);
+      }
+    };
+
+    $("btnShowRole").onclick = async ()=> {
+      if (!roomId) return;
+      await refreshRoleBox();
+    };
+
+    $("btnLeave").onclick = async ()=>{
+      // simple leave: just go home (optional: delete row policies etc.)
+      roomId=null; roomCode=null; hostUid=null;
+      go("screenHome");
+    };
+
+    // Realtime updates
+    let channel = null;
+    function subscribeRoom(){
+      if (channel) supabase.removeChannel(channel);
+      channel = supabase.channel("room-" + roomId);
+
+      channel
+        .on("postgres_changes", { event: "*", schema: "public", table: "players_public", filter: "room_id=eq." + roomId }, async () => {
+          await refreshPlayers();
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "rooms", filter: "id=eq." + roomId }, async () => {
+          // if started, role may be available
+          await refreshRoleBox();
+        })
+        .subscribe();
+    }
+
+    // start
+    go("screenHome");
+  </script>
 </body>
 </html>
