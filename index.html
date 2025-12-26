@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Impostor Wortspiel</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="card">
+    <h1>Impostor Wortspiel</h1>
+
+    <section id="setup">
+      <label>Spieler (2–20)</label>
+      <input id="playerCount" type="number" min="2" max="20" value="6" />
+
+      <label>Wörter (eins pro Zeile)</label>
+      <textarea id="words" rows="8" placeholder="Pizza&#10;Berlin&#10;Schule"></textarea>
+
+      <button id="startBtn">Spiel starten</button>
+      <p class="hint">Tipp: Ihr könnt beliebige eigene Wörter benutzen.</p>
+    </section>
+
+    <section id="reveal" class="hidden">
+      <h2 id="playerTitle">Spieler 1</h2>
+      <div class="secret" id="secretBox">Klicke auf „Aufdecken“</div>
+
+      <div class="row">
+        <button id="revealBtn">Aufdecken</button>
+        <button id="hideBtn" class="secondary">Verstecken</button>
+      </div>
+
+      <div class="row">
+        <button id="nextBtn">Nächster Spieler</button>
+        <button id="restartBtn" class="secondary">Neu starten</button>
+      </div>
+
+      <p class="hint" id="statusHint"></p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
